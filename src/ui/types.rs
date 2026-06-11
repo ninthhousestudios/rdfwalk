@@ -1,13 +1,12 @@
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::app::App;
-
 
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     if let Some(ref err) = app.types_error {
@@ -41,7 +40,11 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Yellow),
             )));
             if i == app.types_selection {
-                li = li.style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD));
+                li = li.style(
+                    Style::default()
+                        .bg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                );
             }
             li
         })

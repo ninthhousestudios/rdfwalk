@@ -1,6 +1,8 @@
+use crate::app::model::FocusTerm;
+#[cfg(feature = "rdf-star")]
+use oxrdf::Subject;
 use oxrdf::{Literal, NamedNode, Term};
 use std::collections::HashMap;
-
 
 pub struct DisplayContext {
     prefixes: HashMap<String, String>, // prefix -> namespace IRI
@@ -10,8 +12,14 @@ pub struct DisplayContext {
 impl DisplayContext {
     pub fn new() -> Self {
         let mut prefixes = HashMap::new();
-        prefixes.insert("rdf".into(), "http://www.w3.org/1999/02/22-rdf-syntax-ns#".into());
-        prefixes.insert("rdfs".into(), "http://www.w3.org/2000/01/rdf-schema#".into());
+        prefixes.insert(
+            "rdf".into(),
+            "http://www.w3.org/1999/02/22-rdf-syntax-ns#".into(),
+        );
+        prefixes.insert(
+            "rdfs".into(),
+            "http://www.w3.org/2000/01/rdf-schema#".into(),
+        );
         prefixes.insert("owl".into(), "http://www.w3.org/2002/07/owl#".into());
         prefixes.insert("xsd".into(), "http://www.w3.org/2001/XMLSchema#".into());
         prefixes.insert("skos".into(), "http://www.w3.org/2004/02/skos/core#".into());
@@ -42,6 +50,8 @@ impl DisplayContext {
             Term::NamedNode(n) => self.display_node(n),
             Term::BlankNode(b) => format!("_:{}", b.as_str()),
             Term::Literal(l) => self.display_literal(l),
+            #[cfg(feature = "rdf-star")]
+            Term::Triple(t) => self.display_triple(t),
         }
     }
 
@@ -51,8 +61,21 @@ impl DisplayContext {
             oxrdf::Term::BlankNode(b) => format!("_:{}", b.as_str()),
             oxrdf::Term::Literal(l) => {
                 let (v, suffix) = self.display_literal_parts(l, 60);
-                match suffix { Some(s) => format!("{} {}", v, s), None => v }
+                match suffix {
+                    Some(s) => format!("{} {}", v, s),
+                    None => v,
+                }
             }
+            #[cfg(feature = "rdf-star")]
+            oxrdf::Term::Triple(t) => self.display_triple(t),
+        }
+    }
+
+    pub fn display_focus(&self, focus: &FocusTerm) -> String {
+        match focus {
+            FocusTerm::NamedNode(n) => self.display_node(n),
+            #[cfg(feature = "rdf-star")]
+            FocusTerm::Triple(t) => self.display_triple(t),
         }
     }
 
@@ -66,7 +89,11 @@ impl DisplayContext {
 
     /// Returns `(value, Option<type_or_lang_suffix>)` with the value sanitized and
     /// truncated to fit `avail_chars` (accounting for the suffix width).
-    pub fn display_literal_parts(&self, lit: &Literal, avail_chars: usize) -> (String, Option<String>) {
+    pub fn display_literal_parts(
+        &self,
+        lit: &Literal,
+        avail_chars: usize,
+    ) -> (String, Option<String>) {
         let (value, suffix) = self.literal_parts(lit);
         let suffix_len = suffix.as_ref().map(|s| s.chars().count() + 1).unwrap_or(0);
         let value_max = avail_chars.saturating_sub(suffix_len);
@@ -94,7 +121,8 @@ impl DisplayContext {
 
     /// Format a literal for SPARQL: "value"^^type or "value"@lang, with proper escaping.
     pub fn sparql_literal(&self, lit: &Literal) -> String {
-        let escaped = lit.value()
+        let escaped = lit
+            .value()
             .replace('\\', "\\\\")
             .replace('"', "\\\"")
             .replace('\n', "\\n")
@@ -117,7 +145,56 @@ impl DisplayContext {
             Term::NamedNode(n) => self.sparql_node(n),
             Term::BlankNode(b) => format!("_:{}", b.as_str()),
             Term::Literal(l) => self.sparql_literal(l),
+            #[cfg(feature = "rdf-star")]
+            Term::Triple(t) => self.sparql_triple(t),
         }
+    }
+
+    #[cfg(feature = "rdf-star")]
+    pub fn sparql_subject(&self, subject: &Subject) -> String {
+        match subject {
+            Subject::NamedNode(n) => self.sparql_node(n),
+            Subject::BlankNode(b) => format!("_:{}", b.as_str()),
+            #[cfg(feature = "rdf-star")]
+            Subject::Triple(t) => self.sparql_triple(t),
+        }
+    }
+
+    pub fn sparql_focus(&self, focus: &FocusTerm) -> String {
+        match focus {
+            FocusTerm::NamedNode(n) => self.sparql_node(n),
+            #[cfg(feature = "rdf-star")]
+            FocusTerm::Triple(t) => self.sparql_triple(t),
+        }
+    }
+
+    #[cfg(feature = "rdf-star")]
+    fn display_triple(&self, triple: &oxrdf::Triple) -> String {
+        format!(
+            "<< {} {} {} >>",
+            self.display_subject(&triple.subject),
+            self.display_node(&triple.predicate),
+            self.display_term(&triple.object)
+        )
+    }
+
+    #[cfg(feature = "rdf-star")]
+    fn display_subject(&self, subject: &Subject) -> String {
+        match subject {
+            Subject::NamedNode(n) => self.display_node(n),
+            Subject::BlankNode(b) => format!("_:{}", b.as_str()),
+            Subject::Triple(t) => self.display_triple(t),
+        }
+    }
+
+    #[cfg(feature = "rdf-star")]
+    fn sparql_triple(&self, triple: &oxrdf::Triple) -> String {
+        format!(
+            "<< {} {} {} >>",
+            self.sparql_subject(&triple.subject),
+            self.sparql_node(&triple.predicate),
+            self.sparql_term(&triple.object)
+        )
     }
 
     fn shorten_iri(&self, iri: &str) -> String {

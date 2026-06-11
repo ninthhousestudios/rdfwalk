@@ -1,8 +1,8 @@
-mod util;
 mod app;
 mod config;
 mod rdf;
 mod ui;
+mod util;
 
 use anyhow::Result;
 use app::{App, View};
@@ -11,10 +11,10 @@ use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use oxrdf::NamedNode;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use rdf::sparql::SparqlClient;
 use std::io;
 
@@ -76,12 +76,16 @@ fn main() -> Result<()> {
     result
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClient, start_uri: Option<String>) -> Result<()> {
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    client: SparqlClient,
+    start_uri: Option<String>,
+) -> Result<()> {
     let mut app = App::new(client);
 
     if let Some(uri_str) = start_uri {
         match NamedNode::new(uri_str) {
-            Ok(uri) => app.navigate_to(uri),
+            Ok(uri) => app.navigate_to_node(uri),
             Err(e) => app.status = format!("Invalid URI: {}", e),
         }
     } else {
@@ -101,9 +105,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                 match (&app.view, key.code, key.modifiers) {
                     // Text input: handle char keys first so they don't leak to global bindings
                     (View::Sparql, KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT)
-                        if app.sparql_mode_input => app.sparql_push_char(c),
+                        if app.sparql_mode_input =>
+                    {
+                        app.sparql_push_char(c)
+                    }
                     (View::Search, KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT)
-                        if app.search_mode_input => app.search_push_char(c),
+                        if app.search_mode_input =>
+                    {
+                        app.search_push_char(c)
+                    }
 
                     // Global quit (only when not typing)
                     (_, KeyCode::Char('q') | KeyCode::Char('Q'), _) if !in_text_input => break,
@@ -111,7 +121,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                     // Switch views (only when not typing)
                     (_, KeyCode::Char('t'), KeyModifiers::NONE) if !in_text_input => {
                         app.view = View::Types;
-                        if app.types_list.is_empty() { app.load_types()?; }
+                        if app.types_list.is_empty() {
+                            app.load_types()?;
+                        }
                     }
                     (_, KeyCode::Char('s'), KeyModifiers::NONE) if !in_text_input => {
                         app.view = View::Sparql;
@@ -124,17 +136,25 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                     (_, KeyCode::Char('m'), KeyModifiers::NONE) if !in_text_input => {
                         app.view = View::Bookmarks;
                     }
-                    (View::Sparql | View::Search | View::Bookmarks, KeyCode::Char('b'), KeyModifiers::NONE)
-                        if !in_text_input =>
-                    {
-                        if app.browser_data.is_some() { app.view = View::Browser; }
+                    (
+                        View::Sparql | View::Search | View::Bookmarks,
+                        KeyCode::Char('b'),
+                        KeyModifiers::NONE,
+                    ) if !in_text_input => {
+                        if app.browser_data.is_some() {
+                            app.view = View::Browser;
+                        }
                     }
                     (View::Sparql | View::Search | View::Bookmarks, KeyCode::Esc, _) => {
-                        if app.browser_data.is_some() { app.view = View::Browser; }
+                        if app.browser_data.is_some() {
+                            app.view = View::Browser;
+                        }
                     }
 
                     // Bookmark toggle in browser
-                    (View::Browser, KeyCode::Char('b'), KeyModifiers::NONE) => app.toggle_bookmark(),
+                    (View::Browser, KeyCode::Char('b'), KeyModifiers::NONE) => {
+                        app.toggle_bookmark()
+                    }
 
                     // Copy current triple to clipboard
                     (View::Browser, KeyCode::Char('c'), KeyModifiers::NONE) => {
@@ -167,17 +187,33 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                         }
                     }
                     (View::Sparql, KeyCode::Enter, _) if app.sparql_mode_input => app.sparql_run(),
-                    (View::Sparql, KeyCode::Backspace, _) if app.sparql_mode_input => app.sparql_backspace(),
-                    (View::Sparql, KeyCode::Left, _) if app.sparql_mode_input => app.sparql_cursor_left(),
-                    (View::Sparql, KeyCode::Right, _) if app.sparql_mode_input => app.sparql_cursor_right(),
-                    (View::Sparql, KeyCode::Char('u'), KeyModifiers::CONTROL) if app.sparql_mode_input => app.sparql_clear(),
-                    (View::Sparql, KeyCode::Char('c'), KeyModifiers::CONTROL) if app.sparql_mode_input => {
-                        match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&app.sparql_input)) {
+                    (View::Sparql, KeyCode::Backspace, _) if app.sparql_mode_input => {
+                        app.sparql_backspace()
+                    }
+                    (View::Sparql, KeyCode::Left, _) if app.sparql_mode_input => {
+                        app.sparql_cursor_left()
+                    }
+                    (View::Sparql, KeyCode::Right, _) if app.sparql_mode_input => {
+                        app.sparql_cursor_right()
+                    }
+                    (View::Sparql, KeyCode::Char('u'), KeyModifiers::CONTROL)
+                        if app.sparql_mode_input =>
+                    {
+                        app.sparql_clear()
+                    }
+                    (View::Sparql, KeyCode::Char('c'), KeyModifiers::CONTROL)
+                        if app.sparql_mode_input =>
+                    {
+                        match arboard::Clipboard::new()
+                            .and_then(|mut cb| cb.set_text(&app.sparql_input))
+                        {
                             Ok(_) => app.status = "Copied".into(),
                             Err(e) => app.status = format!("Clipboard error: {}", e),
                         }
                     }
-                    (View::Sparql, KeyCode::Char('v'), KeyModifiers::CONTROL) if app.sparql_mode_input => {
+                    (View::Sparql, KeyCode::Char('v'), KeyModifiers::CONTROL)
+                        if app.sparql_mode_input =>
+                    {
                         match arboard::Clipboard::new().and_then(|mut cb| cb.get_text()) {
                             Ok(text) => {
                                 app.sparql_input.insert_str(app.sparql_cursor, &text);
@@ -186,9 +222,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                             Err(e) => app.status = format!("Clipboard error: {}", e),
                         }
                     }
-                    (View::Sparql, KeyCode::Up, _) if !app.sparql_mode_input => app.sparql_result_up(),
-                    (View::Sparql, KeyCode::Down, _) if !app.sparql_mode_input => app.sparql_result_down(),
-                    (View::Sparql, KeyCode::Enter, _) if !app.sparql_mode_input => app.sparql_activate(),
+                    (View::Sparql, KeyCode::Up, _) if !app.sparql_mode_input => {
+                        app.sparql_result_up()
+                    }
+                    (View::Sparql, KeyCode::Down, _) if !app.sparql_mode_input => {
+                        app.sparql_result_down()
+                    }
+                    (View::Sparql, KeyCode::Enter, _) if !app.sparql_mode_input => {
+                        app.sparql_activate()
+                    }
 
                     // Bookmarks
                     (View::Bookmarks, KeyCode::Up, _) => app.bookmarks_select_up(),
@@ -197,7 +239,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                     (View::Bookmarks, KeyCode::Delete, _) => {
                         if app.bookmarks_selection < app.bookmarks.len() {
                             app.bookmarks.remove(app.bookmarks_selection);
-                            if app.bookmarks_selection > 0 && app.bookmarks_selection >= app.bookmarks.len() {
+                            if app.bookmarks_selection > 0
+                                && app.bookmarks_selection >= app.bookmarks.len()
+                            {
                                 app.bookmarks_selection -= 1;
                             }
                             app.save_bookmarks();
@@ -211,12 +255,24 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, client: SparqlClie
                         }
                     }
                     (View::Search, KeyCode::Enter, _) if app.search_mode_input => app.search_run(),
-                    (View::Search, KeyCode::Backspace, _) if app.search_mode_input => app.search_backspace(),
-                    (View::Search, KeyCode::Left, _) if app.search_mode_input => app.search_cursor_left(),
-                    (View::Search, KeyCode::Right, _) if app.search_mode_input => app.search_cursor_right(),
-                    (View::Search, KeyCode::Up, _) if !app.search_mode_input => app.search_result_up(),
-                    (View::Search, KeyCode::Down, _) if !app.search_mode_input => app.search_result_down(),
-                    (View::Search, KeyCode::Enter, _) if !app.search_mode_input => app.search_activate(),
+                    (View::Search, KeyCode::Backspace, _) if app.search_mode_input => {
+                        app.search_backspace()
+                    }
+                    (View::Search, KeyCode::Left, _) if app.search_mode_input => {
+                        app.search_cursor_left()
+                    }
+                    (View::Search, KeyCode::Right, _) if app.search_mode_input => {
+                        app.search_cursor_right()
+                    }
+                    (View::Search, KeyCode::Up, _) if !app.search_mode_input => {
+                        app.search_result_up()
+                    }
+                    (View::Search, KeyCode::Down, _) if !app.search_mode_input => {
+                        app.search_result_down()
+                    }
+                    (View::Search, KeyCode::Enter, _) if !app.search_mode_input => {
+                        app.search_activate()
+                    }
 
                     _ => {}
                 }

@@ -7,10 +7,12 @@ pub fn truncate(s: String, max: usize) -> String {
     }
 }
 
-
 /// Collapses a string to a single displayable line.
 /// Replaces control characters (newlines, tabs, …) with spaces and compresses runs.
 pub fn sanitize(s: &str) -> String {
-    let single: String = s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let single: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
     single.split_whitespace().collect::<Vec<_>>().join(" ")
 }

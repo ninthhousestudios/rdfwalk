@@ -1,13 +1,12 @@
 pub mod model;
 
-use anyhow::Result;
-use oxrdf::{NamedNode, Term};
-use std::sync::Arc;
 use crate::config;
 use crate::rdf::display::DisplayContext;
 use crate::rdf::sparql::SparqlClient;
+use anyhow::Result;
 use model::*;
-
+use oxrdf::{NamedNode, Term};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
@@ -17,7 +16,6 @@ pub enum View {
     Search,
     Bookmarks,
 }
-
 
 pub struct App {
     pub client: Arc<SparqlClient>,
@@ -29,7 +27,7 @@ pub struct App {
     pub browser_items: Vec<BrowserItem>,
     pub browser_selection: usize,
     pub browser_section_offsets: [usize; 4], // start index of each section
-    pub history: Vec<NamedNode>,
+    pub history: Vec<FocusTerm>,
     pub history_pos: usize,
 
     // Types state
@@ -120,22 +118,26 @@ impl App {
         }
     }
 
-    pub fn navigate_to(&mut self, uri: NamedNode) {
+    pub fn navigate_to(&mut self, focus: FocusTerm) {
         // Truncate forward history
         if self.history_pos < self.history.len() {
             self.history.truncate(self.history_pos);
         }
-        self.history.push(uri.clone());
+        self.history.push(focus.clone());
         self.history_pos = self.history.len();
-        self.load_browser(uri);
+        self.load_browser(focus);
         self.view = View::Browser;
+    }
+
+    pub fn navigate_to_node(&mut self, uri: NamedNode) {
+        self.navigate_to(FocusTerm::NamedNode(uri));
     }
 
     pub fn history_back(&mut self) {
         if self.history_pos > 1 {
             self.history_pos -= 1;
-            let uri = self.history[self.history_pos - 1].clone();
-            self.load_browser(uri);
+            let focus = self.history[self.history_pos - 1].clone();
+            self.load_browser(focus);
             self.view = View::Browser;
         }
     }
@@ -143,50 +145,78 @@ impl App {
     pub fn history_forward(&mut self) {
         if self.history_pos < self.history.len() {
             self.history_pos += 1;
-            let uri = self.history[self.history_pos - 1].clone();
-            self.load_browser(uri);
+            let focus = self.history[self.history_pos - 1].clone();
+            self.load_browser(focus);
             self.view = View::Browser;
         }
     }
 
-    fn load_browser(&mut self, uri: NamedNode) {
-        self.status = format!("Loading {}…", self.display.display_node(&uri));
+    fn load_browser(&mut self, focus: FocusTerm) {
+        self.status = format!("Loading {}…", self.display.display_focus(&focus));
         self.browser_selection = 0;
 
-        let lit = self.client.literal_properties(&uri).unwrap_or_default();
-        let out = self.client.outgoing_links(&uri).unwrap_or_default();
-        let inc = self.client.incoming_links(&uri).unwrap_or_default();
-        let pred = self.client.as_predicate(&uri).unwrap_or_default();
+        let lit = self.client.literal_properties(&focus).unwrap_or_default();
+        let out = self.client.outgoing_links(&focus).unwrap_or_default();
+        let inc = self.client.incoming_links(&focus).unwrap_or_default();
+        let pred = self.client.as_predicate(&focus).unwrap_or_default();
 
         let mut all_nodes: Vec<NamedNode> = Vec::new();
-        for (p, _) in &lit { all_nodes.push(p.clone()); }
-        for (p, o) in &out { all_nodes.push(p.clone()); all_nodes.push(o.clone()); }
-        for (p, s) in &inc { all_nodes.push(p.clone()); all_nodes.push(s.clone()); }
+        for (p, _) in &lit {
+            all_nodes.push(p.clone());
+        }
+        for (p, o) in &out {
+            all_nodes.push(p.clone());
+            if let Some(n) = o.as_named_node() {
+                all_nodes.push(n.clone());
+            }
+        }
+        for (p, s) in &inc {
+            all_nodes.push(p.clone());
+            if let Some(n) = s.as_named_node() {
+                all_nodes.push(n.clone());
+            }
+        }
         for (s, o) in &pred {
-            all_nodes.push(s.clone());
-            if let Term::NamedNode(n) = o { all_nodes.push(n.clone()); }
+            if let Some(n) = s.as_named_node() {
+                all_nodes.push(n.clone());
+            }
+            if let Term::NamedNode(n) = o {
+                all_nodes.push(n.clone());
+            }
         }
         self.fetch_labels_for_nodes(&all_nodes);
 
         let mut items: Vec<BrowserItem> = Vec::new();
         let s0 = 0;
         for (p, v) in &lit {
-            items.push(BrowserItem::LiteralProp { prop: p.clone(), value: v.clone() });
+            items.push(BrowserItem::LiteralProp {
+                prop: p.clone(),
+                value: v.clone(),
+            });
         }
         let s1 = items.len();
         for (p, o) in &out {
-            items.push(BrowserItem::OutgoingLink { prop: p.clone(), target: o.clone() });
+            items.push(BrowserItem::OutgoingLink {
+                prop: p.clone(),
+                target: o.clone(),
+            });
         }
         let s2 = items.len();
         for (p, s) in &inc {
-            items.push(BrowserItem::IncomingLink { prop: p.clone(), source: s.clone() });
+            items.push(BrowserItem::IncomingLink {
+                prop: p.clone(),
+                source: s.clone(),
+            });
         }
         let s3 = items.len();
         for (s, o) in &pred {
-            items.push(BrowserItem::AsPredicateRow { subject: s.clone(), object: o.clone() });
+            items.push(BrowserItem::AsPredicateRow {
+                subject: s.clone(),
+                object: o.clone(),
+            });
         }
 
-        self.browser_data = Some(BrowserData { uri });
+        self.browser_data = Some(BrowserData { focus });
         self.browser_items = items;
         self.browser_section_offsets = [s0, s1, s2, s3];
         self.status = String::new();
@@ -207,7 +237,8 @@ impl App {
     pub fn browser_next_section(&mut self) {
         let total = self.browser_items.len();
         // find the start of the next non-empty section after the current selection
-        let next = self.browser_section_offsets
+        let next = self
+            .browser_section_offsets
             .iter()
             .find(|&&o| o > self.browser_selection && o < total);
         if let Some(&o) = next {
@@ -217,7 +248,8 @@ impl App {
 
     pub fn browser_prev_section(&mut self) {
         // find the start of the last non-empty section that begins before the current selection
-        let prev = self.browser_section_offsets
+        let prev = self
+            .browser_section_offsets
             .iter()
             .filter(|&&o| o < self.browser_selection)
             .last();
@@ -228,14 +260,16 @@ impl App {
 
     pub fn browser_activate(&mut self) {
         if let Some(item) = self.browser_items.get(self.browser_selection) {
-            if let Some(node) = item.navigable_node().cloned() {
-                self.navigate_to(node);
+            if let Some(focus) = item.navigable_focus().cloned() {
+                self.navigate_to(focus);
             }
         }
     }
 
     pub fn types_select_up(&mut self) {
-        if self.types_selection > 0 { self.types_selection -= 1; }
+        if self.types_selection > 0 {
+            self.types_selection -= 1;
+        }
     }
 
     pub fn types_select_down(&mut self) {
@@ -246,7 +280,7 @@ impl App {
 
     pub fn types_activate(&mut self) {
         if let Some(uri) = self.types_list.get(self.types_selection).cloned() {
-            self.navigate_to(uri);
+            self.navigate_to_node(uri);
         }
     }
 
@@ -301,7 +335,9 @@ impl App {
 
     pub fn sparql_run(&mut self) {
         let q = self.sparql_input.trim().to_string();
-        if q.is_empty() { return; }
+        if q.is_empty() {
+            return;
+        }
         self.status = "Running query…".into();
         self.sparql_mode_input = false;
         match self.client.run_query(&q) {
@@ -325,7 +361,9 @@ impl App {
     }
 
     pub fn sparql_result_up(&mut self) {
-        if self.sparql_selection > 0 { self.sparql_selection -= 1; }
+        if self.sparql_selection > 0 {
+            self.sparql_selection -= 1;
+        }
     }
 
     pub fn sparql_result_down(&mut self) {
@@ -339,11 +377,11 @@ impl App {
     pub fn sparql_activate(&mut self) {
         if let Some(r) = &self.sparql_result {
             if let Some(row) = r.rows.get(self.sparql_selection) {
-                let first_uri = row.iter().find_map(|cell| {
-                    if let Some(Term::NamedNode(n)) = cell { Some(n.clone()) } else { None }
-                });
-                if let Some(uri) = first_uri {
-                    self.navigate_to(uri);
+                let first_focus = row
+                    .iter()
+                    .find_map(|cell| cell.clone().and_then(|term| FocusTerm::try_from(term).ok()));
+                if let Some(focus) = first_focus {
+                    self.navigate_to(focus);
                 }
             }
         }
@@ -357,7 +395,10 @@ impl App {
     pub fn search_backspace(&mut self) {
         if self.search_cursor > 0 {
             let idx = self.search_input[..self.search_cursor]
-                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
             self.search_input.remove(idx);
             self.search_cursor = idx;
         }
@@ -366,14 +407,18 @@ impl App {
     pub fn search_cursor_left(&mut self) {
         if self.search_cursor > 0 {
             self.search_cursor = self.search_input[..self.search_cursor]
-                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
         }
     }
 
     pub fn search_cursor_right(&mut self) {
         if self.search_cursor < self.search_input.len() {
             self.search_cursor = self.search_input[self.search_cursor..]
-                .char_indices().nth(1)
+                .char_indices()
+                .nth(1)
                 .map(|(i, _)| self.search_cursor + i)
                 .unwrap_or(self.search_input.len());
         }
@@ -381,18 +426,30 @@ impl App {
 
     pub fn search_run(&mut self) {
         let term = self.search_input.trim().to_string();
-        if term.is_empty() { return; }
+        if term.is_empty() {
+            return;
+        }
         self.status = "Searching…".into();
         self.search_mode_input = false;
         match self.client.search_resources(&term) {
             Ok(results) => {
                 let count = results.len();
                 let mut all_nodes: Vec<NamedNode> = Vec::new();
-                for (s, p, _) in &results { all_nodes.push(s.clone()); all_nodes.push(p.clone()); }
+                for (s, p, _) in &results {
+                    if let Some(n) = s.as_named_node() {
+                        all_nodes.push(n.clone());
+                    }
+                    all_nodes.push(p.clone());
+                }
                 self.fetch_labels_for_nodes(&all_nodes);
-                self.search_results = results.into_iter().map(|(s, p, v)| SearchResult {
-                    resource: s, property: p, matched_value: v,
-                }).collect();
+                self.search_results = results
+                    .into_iter()
+                    .map(|(s, p, v)| SearchResult {
+                        resource: s,
+                        property: p,
+                        matched_value: v,
+                    })
+                    .collect();
                 self.search_selection = 0;
                 self.status = format!("{} results", count);
             }
@@ -404,7 +461,9 @@ impl App {
     }
 
     pub fn search_result_up(&mut self) {
-        if self.search_selection > 0 { self.search_selection -= 1; }
+        if self.search_selection > 0 {
+            self.search_selection -= 1;
+        }
     }
 
     pub fn search_result_down(&mut self) {
@@ -416,16 +475,32 @@ impl App {
     pub fn current_triple_sparql(&self) -> Option<String> {
         let d = self.browser_data.as_ref()?;
         let item = self.browser_items.get(self.browser_selection)?;
-        let current = self.display.sparql_node(&d.uri);
+        let current = self.display.sparql_focus(&d.focus);
         let text = match item {
-            BrowserItem::LiteralProp { prop, value } =>
-                format!("{} {} {} .", current, self.display.sparql_node(prop), self.display.sparql_literal(value)),
-            BrowserItem::OutgoingLink { prop, target } =>
-                format!("{} {} {} .", current, self.display.sparql_node(prop), self.display.sparql_node(target)),
-            BrowserItem::IncomingLink { prop, source } =>
-                format!("{} {} {} .", self.display.sparql_node(source), self.display.sparql_node(prop), current),
-            BrowserItem::AsPredicateRow { subject, object } =>
-                format!("{} {} {} .", self.display.sparql_node(subject), current, self.display.sparql_term(object)),
+            BrowserItem::LiteralProp { prop, value } => format!(
+                "{} {} {} .",
+                current,
+                self.display.sparql_node(prop),
+                self.display.sparql_literal(value)
+            ),
+            BrowserItem::OutgoingLink { prop, target } => format!(
+                "{} {} {} .",
+                current,
+                self.display.sparql_node(prop),
+                self.display.sparql_focus(target)
+            ),
+            BrowserItem::IncomingLink { prop, source } => format!(
+                "{} {} {} .",
+                self.display.sparql_focus(source),
+                self.display.sparql_node(prop),
+                current
+            ),
+            BrowserItem::AsPredicateRow { subject, object } => format!(
+                "{} {} {} .",
+                self.display.sparql_focus(subject),
+                current,
+                self.display.sparql_term(object)
+            ),
         };
         Some(text)
     }
@@ -437,14 +512,20 @@ impl App {
     }
 
     fn load_bookmarks() -> Vec<NamedNode> {
-        config::load().bookmarks.iter()
+        config::load()
+            .bookmarks
+            .iter()
             .filter_map(|s| NamedNode::new(s).ok())
             .collect()
     }
 
     pub fn save_bookmarks(&self) {
         let cfg = config::Config {
-            bookmarks: self.bookmarks.iter().map(|n| n.as_str().to_string()).collect(),
+            bookmarks: self
+                .bookmarks
+                .iter()
+                .map(|n| n.as_str().to_string())
+                .collect(),
         };
         config::save(&cfg);
     }
@@ -455,7 +536,10 @@ impl App {
 
     pub fn toggle_bookmark(&mut self) {
         if let Some(d) = &self.browser_data {
-            let uri = d.uri.clone();
+            let Some(uri) = d.focus.as_named_node().cloned() else {
+                self.status = "Only IRIs can be bookmarked".into();
+                return;
+            };
             if let Some(pos) = self.bookmarks.iter().position(|b| b == &uri) {
                 self.bookmarks.remove(pos);
                 self.status = "Bookmark removed".into();
@@ -468,7 +552,9 @@ impl App {
     }
 
     pub fn bookmarks_select_up(&mut self) {
-        if self.bookmarks_selection > 0 { self.bookmarks_selection -= 1; }
+        if self.bookmarks_selection > 0 {
+            self.bookmarks_selection -= 1;
+        }
     }
 
     pub fn bookmarks_select_down(&mut self) {
@@ -479,7 +565,7 @@ impl App {
 
     pub fn bookmarks_activate(&mut self) {
         if let Some(uri) = self.bookmarks.get(self.bookmarks_selection).cloned() {
-            self.navigate_to(uri);
+            self.navigate_to_node(uri);
         }
     }
 }

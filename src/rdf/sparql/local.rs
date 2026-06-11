@@ -1,7 +1,7 @@
+use super::{QueryResult, SparqlBackend};
 use anyhow::{Context, Result};
 use oxrdf::Term;
 use std::sync::Arc;
-use super::{QueryResult, SparqlBackend};
 
 // ArcDataset wraps Arc<Dataset> and implements QueryableDataset so that
 // execute() receives an owned value without cloning the actual quad data.
@@ -24,11 +24,7 @@ impl spareval::QueryableDataset for ArcDataset {
         use spareval::InternalQuad;
         let quads: Vec<_> =
             <oxrdf::Dataset as spareval::QueryableDataset>::internal_quads_for_pattern(
-                &self.0,
-                subject,
-                predicate,
-                object,
-                graph_name,
+                &self.0, subject, predicate, object, graph_name,
             )
             .map(|r| {
                 r.map(|q| InternalQuad {
@@ -73,7 +69,9 @@ impl LocalBackend {
         for quad in RdfParser::from_format(fmt).for_reader(file) {
             dataset.insert(&quad.context("parsing RDF file")?);
         }
-        Ok(Self { dataset: Arc::new(dataset) })
+        Ok(Self {
+            dataset: Arc::new(dataset),
+        })
     }
 }
 
@@ -99,9 +97,62 @@ impl SparqlBackend for LocalBackend {
                 }
                 Ok(QueryResult { variables, rows })
             }
-            QueryResults::Boolean(_) | QueryResults::Graph(_) => {
-                Ok(QueryResult { variables: vec![], rows: vec![] })
-            }
+            QueryResults::Boolean(_) | QueryResults::Graph(_) => Ok(QueryResult {
+                variables: vec![],
+                rows: vec![],
+            }),
         }
+    }
+}
+
+#[cfg(all(test, feature = "rdf-star"))]
+mod tests {
+    use super::*;
+    use crate::app::model::FocusTerm;
+    use crate::rdf::sparql::SparqlClient;
+    use oxrdf::Term;
+
+    #[test]
+    fn turtle_star_quoted_triples_are_queryable_and_browsable() -> Result<()> {
+        let path = std::env::temp_dir().join(format!(
+            "rdfwalk-rdf-star-{}-{}.ttl",
+            std::process::id(),
+            "quoted-triples"
+        ));
+        std::fs::write(
+            &path,
+            r#"@prefix ex: <http://ex/> .
+ex:s ex:p ex:o .
+<< ex:s ex:p ex:o >> ex:note "meta" .
+ex:a ex:said << ex:s ex:p ex:o >> .
+"#,
+        )
+        .context("writing Turtle-star fixture")?;
+
+        let client = SparqlClient::local(path.to_str().unwrap())?;
+        let result =
+            client.run_query(r#"SELECT ?s WHERE { ?s <http://ex/note> "meta" . } LIMIT 1"#)?;
+        let focus = result
+            .rows
+            .first()
+            .and_then(|row| row.first())
+            .and_then(|term| term.clone())
+            .and_then(|term| FocusTerm::try_from(term).ok())
+            .context("expected quoted triple subject")?;
+
+        assert!(matches!(Term::from(focus.clone()), Term::Triple(_)));
+
+        let literals = client.literal_properties(&focus)?;
+        assert_eq!(literals.len(), 1);
+        assert_eq!(literals[0].0.as_str(), "http://ex/note");
+        assert_eq!(literals[0].1.value(), "meta");
+
+        let incoming = client.incoming_links(&focus)?;
+        assert_eq!(incoming.len(), 1);
+        assert_eq!(incoming[0].0.as_str(), "http://ex/said");
+        assert!(matches!(&incoming[0].1, FocusTerm::NamedNode(n) if n.as_str() == "http://ex/a"));
+
+        let _ = std::fs::remove_file(path);
+        Ok(())
     }
 }

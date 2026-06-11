@@ -1,7 +1,7 @@
+use super::{QueryResult, SparqlBackend};
 use anyhow::{Context, Result};
 use oxrdf::Term;
 use sparesults::{QueryResultsFormat, QueryResultsParser, ReaderQueryResultsParserOutput};
-use super::{QueryResult, SparqlBackend};
 
 pub(super) struct RemoteBackend {
     endpoint: String,
@@ -56,9 +56,10 @@ impl SparqlBackend for RemoteBackend {
                 }
                 Ok(QueryResult { variables, rows })
             }
-            ReaderQueryResultsParserOutput::Boolean(_) => {
-                Ok(QueryResult { variables: vec![], rows: vec![] })
-            }
+            ReaderQueryResultsParserOutput::Boolean(_) => Ok(QueryResult {
+                variables: vec![],
+                rows: vec![],
+            }),
         }
     }
 }

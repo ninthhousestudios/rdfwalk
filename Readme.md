@@ -16,6 +16,12 @@ For local file support, enable the `local` feature:
 cargo install rdfwalk --features local
 ```
 
+For RDF-star quoted triple support in local files, enable the `rdf-star` feature:
+
+```
+cargo install rdfwalk --features rdf-star
+```
+
 ## Usage
 
 **Remote mode** — query a SPARQL endpoint:
@@ -29,6 +35,7 @@ rdfwalk --local <file> [start-uri]
 ```
 
 Supported file formats: NTriples (`.nt`), Turtle (`.ttl`), N3 (`.n3`), RDF/XML (`.rdf`, `.xml`).
+RDF-star quoted triples are supported for NTriples and Turtle when built with `--features rdf-star`.
 
 If no starting URI is given, the tool opens on the Types view. If a URI is given, it opens directly on that resource in the Browser view.
 
@@ -141,3 +148,6 @@ With `--features local`:
 - [spareval](https://github.com/oxigraph/oxigraph/tree/main/lib/spareval) — in-memory SPARQL evaluation
 - [spargebra](https://github.com/oxigraph/oxigraph/tree/main/lib/spargebra) — SPARQL query parser
 - [oxrdfio](https://github.com/oxigraph/oxigraph/tree/main/lib/oxrdfio) — RDF file parsing
+
+With `--features rdf-star`:
+- Enables RDF-star support in `oxrdf`, `oxrdfio`, `spargebra`, `spareval`, and `sparesults`.

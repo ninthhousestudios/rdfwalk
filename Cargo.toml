@@ -14,6 +14,14 @@ documentation = "https://docs.rs/rdfwalk/"
 [features]
 default = []
 local = ["dep:spareval", "dep:spargebra", "dep:oxrdfio"]
+rdf-star = [
+    "local",
+    "oxrdf/rdf-star",
+    "oxrdfio/rdf-star",
+    "spargebra/rdf-star",
+    "spareval/rdf-star",
+    "sparesults/rdf-star",
+]
 
 [dependencies]
 ratatui = "0.29"
@@ -29,4 +37,3 @@ sparesults = "0.2"
 spareval = { version = "0.1", optional = true }
 spargebra = { version = "0.3", optional = true }
 oxrdfio  = { version = "0.1", optional = true }
-
